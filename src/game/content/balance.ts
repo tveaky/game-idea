@@ -1,4 +1,6 @@
 export const balance = {
+  salesEffect: 1.7,
+  defaultCampaignMonths: 60,
   startCash: 600000,
   hours: 160,
   employerFactor: 1.42,

@@ -1952,3 +1952,42 @@ button {
     gap: 7px;
   }
 }
+.staffing-summary {
+  background: #f3f6ed;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 16px 0;
+  font-size: 11px;
+}
+.staffing-summary small {
+  display: block;
+  margin: 5px 0 10px;
+}
+.staffing-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e7ecdf;
+}
+.staffing-row > span {
+  flex: 1;
+  min-width: 0;
+}
+.staffing-row strong {
+  font-size: 11px;
+  display: block;
+}
+.staffing-row small {
+  display: block;
+  font-size: 9px;
+}
+.staffing-row select {
+  width: 78px;
+  margin: 0;
+  padding: 8px 5px;
+  flex-shrink: 0;
+}
+.staffing-list {
+  margin-bottom: 20px;
+}

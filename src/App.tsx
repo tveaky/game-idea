@@ -33,7 +33,9 @@ import {
 import {
   activePeople,
   advance,
-  assign,
+  assignedCapacity,
+  bookingAvailable,
+  setStaffing,
   forecast,
   newGame,
   setAllocation,
@@ -78,6 +80,7 @@ export default function App() {
   const [tab, setTab] = useState("Översikt");
   const [name, setName] = useState("Lind & Partners");
   const [specialty, setSpecialty] = useState<Specialty>("Systemutveckling");
+  const [campaignMonths, setCampaignMonths] = useState(60);
   const [error, setError] = useState("");
   const [report, setReport] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -150,7 +153,7 @@ export default function App() {
             </h1>
             <p>
               Starta ett IT-konsultbolag. Hitta människorna, vinn förtroendet
-              och få kassan att räcka. 36 månader. Inga givna svar.
+              och få kassan att räcka. Bygg i din egen takt. Inga givna svar.
             </p>
             <div className="welcome-points">
               <span>
@@ -186,6 +189,19 @@ export default function App() {
                 ))}
               </select>
             </label>
+            <label>
+              Spellängd
+              <select
+                value={campaignMonths}
+                onChange={(e) => setCampaignMonths(Number(e.target.value))}
+              >
+                <option value={36}>36 månader · en kortare utmaning</option>
+                <option value={60}>
+                  60 månader · tid att bygga (standard)
+                </option>
+                <option value={120}>120 månader · den långa resan</option>
+              </select>
+            </label>
             <div className="start-budget">
               <span>Din startkassa</span>
               <strong>600 000 kr</strong>
@@ -193,7 +209,9 @@ export default function App() {
             </div>
             <button
               className="primary wide"
-              onClick={() => setG(newGame(name, specialty, Date.now() >>> 0))}
+              onClick={() =>
+                setG(newGame(name, specialty, Date.now() >>> 0, campaignMonths))
+              }
             >
               Starta mitt bolag <ArrowRight size={18} />
             </button>
@@ -237,7 +255,7 @@ export default function App() {
     Number(g.plan.expansion) +
     Number(g.plan.credit > 0) +
     Number(g.plan.repay > 0);
-  const finished = g.bankrupt || (g.month > 36 && !g.continued);
+  const finished = g.bankrupt || (g.month > g.campaignMonths && !g.continued);
   const issues = [
     {
       title:
@@ -249,13 +267,15 @@ export default function App() {
       tab: "Ekonomi",
     },
     {
-      title: contracts.some((d) => !d.assigned)
+      title: contracts.some((d) => assignedCapacity(d) < d.scope - 0.000001)
         ? "Ett uppdrag saknar bemanning"
         : "Nästa affär börjar med ett samtal",
-      text: contracts.some((d) => !d.assigned)
+      text: contracts.some((d) => assignedCapacity(d) < d.scope - 0.000001)
         ? "Ett vunnet avtal behöver rätt person innan leveransen börjar."
         : `${open.length} öppna möjligheter. Prioritera och avsätt tid för att ta dem vidare.`,
-      tab: contracts.some((d) => !d.assigned) ? "Uppdrag" : "Försäljning",
+      tab: contracts.some((d) => assignedCapacity(d) < d.scope - 0.000001)
+        ? "Uppdrag"
+        : "Försäljning",
     },
     {
       title: staff.some((p) => p.happiness < 45)
@@ -306,9 +326,16 @@ export default function App() {
         <div className="sidebar-bottom">
           <div className="chapter">
             <span>DIN RESA</span>
-            <strong>{Math.min(g.month, 36)} av 36 månader</strong>
+            <strong>
+              {Math.min(g.month, g.campaignMonths)} av {g.campaignMonths}{" "}
+              månader
+            </strong>
             <div className="progress">
-              <i style={{ width: `${Math.min(100, (g.month / 36) * 100)}%` }} />
+              <i
+                style={{
+                  width: `${Math.min(100, (g.month / g.campaignMonths) * 100)}%`,
+                }}
+              />
             </div>
             <small>
               {g.national ? "Nationell marknad" : "Lokal marknad"} ·{" "}
@@ -430,7 +457,9 @@ export default function App() {
           {finished && (
             <section className="result-banner">
               <div className="eyebrow">
-                {g.bankrupt ? "SLUT PÅ KASSAN" : "36 MÅNADER SENARE"}
+                {g.bankrupt
+                  ? "SLUT PÅ KASSAN"
+                  : `${g.campaignMonths} MÅNADER SENARE`}
               </div>
               <h2>
                 {g.bankrupt
@@ -961,9 +990,10 @@ export default function App() {
           {tab === "Uppdrag" && (
             <>
               <div className="note">
-                En konsult kan tilldelas ett aktivt uppdrag. Fördela sedan
-                leveranstid under Personal. Brist på tid eller rätt kompetens
-                påverkar kvaliteten.
+                Fördela varje uppdrag mellan flera konsulter i procent av deras
+                heltid. 50 % + 50 % täcker ett uppdrag på 100 %. En konsult kan
+                dela sin tid mellan flera uppdrag, men aldrig bokas över 100 %
+                under samma månad. Avsätt också leveranstid under Personal.
               </div>
               <div className="deal-grid">
                 {contracts.map((d) => (
@@ -989,39 +1019,115 @@ export default function App() {
                       {d.remaining} leveransmånader kvar · {d.paymentTerms} mån
                       betalningsvillkor
                     </p>
-                    <label>
-                      Ansvarig konsult
-                      <select
-                        value={d.assigned}
-                        disabled={finished}
-                        onChange={(e) =>
-                          setG((n) => (n ? assign(n, d.id, e.target.value) : n))
-                        }
-                      >
-                        <option value="">Välj bemanning</option>
-                        {g.people
-                          .filter((p) => p.role !== "seller")
-                          .map((p) => (
-                            <option
-                              key={p.id}
-                              value={p.id}
-                              disabled={contracts.some(
-                                (x) => x.id !== d.id && x.assigned === p.id,
-                              )}
-                            >
-                              {p.name} · {p.specialty}
-                              {p.start > g.month ? ` · start m${p.start}` : ""}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
+                    <div className="staffing-summary">
+                      <strong>
+                        Bemanning {pct(assignedCapacity(d))} / {pct(d.scope)}
+                      </strong>
+                      <small>
+                        {(d.scope * balance.hours).toFixed(0)} timmar per månad
+                        · {d.scope.toLocaleString("sv-SE")} heltidstjänster
+                      </small>
+                      <div className="progress">
+                        <i
+                          style={{
+                            width: `${Math.min(100, (assignedCapacity(d) / d.scope) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="staffing-list">
+                      {g.people
+                        .filter((p) => p.role !== "seller")
+                        .map((p) => {
+                          const share =
+                            d.assignments.find((a) => a.personId === p.id)
+                              ?.fraction || 0;
+                          const max = Math.min(
+                            bookingAvailable(g, d.id, p.id),
+                            Math.max(0, d.scope - assignedCapacity(d) + share),
+                          );
+                          return (
+                            <label className="staffing-row" key={p.id}>
+                              <span>
+                                <strong>{p.name}</strong>
+                                <small>
+                                  {p.specialty}
+                                  {p.start > g.month
+                                    ? ` · börjar m${p.start}`
+                                    : ""}
+                                </small>
+                                <small>
+                                  Leveranstid {pct(p.allocation.delivery)} ·
+                                  bokningsutrymme{" "}
+                                  {pct(bookingAvailable(g, d.id, p.id))}
+                                </small>
+                              </span>
+                              <select
+                                aria-label={`${d.customer}: ${p.name} bemanning`}
+                                value={Math.round(share * 10000) / 100}
+                                disabled={finished}
+                                onChange={(e) =>
+                                  setG((n) =>
+                                    n
+                                      ? setStaffing(
+                                          n,
+                                          d.id,
+                                          p.id,
+                                          Number(e.target.value) / 100,
+                                        )
+                                      : n,
+                                  )
+                                }
+                              >
+                                {Array.from(
+                                  new Set([
+                                    0,
+                                    ...Array.from(
+                                      { length: 100 },
+                                      (_, i) => i + 1,
+                                    ),
+                                    Math.round(share * 10000) / 100,
+                                  ]),
+                                )
+                                  .sort((a, b) => a - b)
+                                  .map((value) => (
+                                    <option
+                                      key={value}
+                                      value={value}
+                                      disabled={value / 100 > max + 0.000001}
+                                    >
+                                      {value} %
+                                    </option>
+                                  ))}
+                              </select>
+                            </label>
+                          );
+                        })}
+                    </div>
+                    {d.assignments.some((a) => {
+                      const p = g.people.find((p) => p.id === a.personId);
+                      return (
+                        !p ||
+                        p.start > g.month ||
+                        p.allocation.delivery <
+                          a.fraction +
+                            1 -
+                            bookingAvailable(g, d.id, p.id) -
+                            0.000001
+                      );
+                    }) && (
+                      <p className="warning">
+                        Planerad bemanning saknar leveranstid eller väntar på
+                        startdatum. Kontrollera Personal och kassaprognosen.
+                      </p>
+                    )}
                     <button
                       className={
                         (g.plan.subcontract.includes(d.id)
                           ? "secondary selected"
                           : "secondary") + " wide"
                       }
-                      disabled={!!d.assigned || finished}
+                      disabled={finished}
                       onClick={() =>
                         update(
                           (n) =>
@@ -1041,8 +1147,8 @@ export default function App() {
                       Underkonsult · 820 kr/tim
                     </button>
                     <small>
-                      Underkonsult kan lösa obemannade uppdrag. Tillgängligheten
-                      är inte garanterad.
+                      Underkonsult fyller det som egna konsulter inte levererar.
+                      Tillgängligheten är inte garanterad.
                     </small>
                   </section>
                 ))}
@@ -1459,12 +1565,23 @@ export default function App() {
           )}
           {contracts.some(
             (d) =>
-              !d.assigned &&
+              assignedCapacity(d) < d.scope - 0.000001 &&
               d.start <= g.month &&
               !g.plan.subcontract.includes(d.id),
           ) && (
             <p className="warning">
               Ett uppdrag som ska levereras saknar bemanning.
+            </p>
+          )}
+          {f.deliveries.some(
+            (item) =>
+              item.capacity <
+              (g.deals.find((d) => d.id === item.dealId)?.scope || 0) -
+                0.000001,
+          ) && (
+            <p className="warning">
+              Planerad leveranstid täcker inte alla uppdrag. Kontrollera
+              procentfördelning, startdatum och leveranstid under Personal.
             </p>
           )}
           <p className="note">

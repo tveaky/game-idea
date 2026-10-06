@@ -24,6 +24,24 @@ export function parseSave(text: string): Game {
   } catch {
     throw new Error("Filen innehåller inte giltig JSON.");
   }
+  // Keep the storage key so existing browser saves are upgraded in place.
+  if (obj(g) && g.version === 1) {
+    if (
+      !arr(g.deals, (d) => obj(d) && str(d.assigned) && finite(d.scope, 0.1, 1))
+    )
+      throw new Error("Den äldre sparfilens bemanning är ogiltig.");
+    g.deals = g.deals.map((d: any) => {
+      const { assigned, ...rest } = d;
+      return {
+        ...rest,
+        assignments: assigned
+          ? [{ personId: assigned, fraction: d.scope }]
+          : [],
+      };
+    });
+    g.version = 2;
+    g.campaignMonths = 60;
+  }
   const id = (x: unknown) => str(x) && x.length > 0;
   const candidate = (x: any) => candidates.some((c) => c.id === x);
   const person = (p: any) =>
@@ -49,7 +67,7 @@ export function parseSave(text: string): Game {
     Number.isInteger(d.stage) &&
     finite(d.stage, 0, 7) &&
     finite(d.rate, 100, 10000) &&
-    finite(d.scope, 0.1, 1) &&
+    finite(d.scope, 0.1, 3) &&
     Number.isInteger(d.duration) &&
     finite(d.duration, 1, 100) &&
     Number.isInteger(d.start) &&
@@ -60,7 +78,15 @@ export function parseSave(text: string): Game {
     finite(d.competition, 0, 1) &&
     typeof d.priority === "boolean" &&
     finite(d.price, 0.85, 1.15) &&
-    str(d.assigned) &&
+    arr(
+      d.assignments,
+      (a: any) => obj(a) && id(a.personId) && finite(a.fraction, 0.0001, 1),
+      30,
+    ) &&
+    new Set(d.assignments.map((a: any) => a.personId)).size ===
+      d.assignments.length &&
+    d.assignments.reduce((sum: number, a: any) => sum + a.fraction, 0) <=
+      d.scope + 0.000001 &&
     finite(d.quality, 0, 100) &&
     Number.isInteger(d.remaining) &&
     finite(d.remaining, 0, 1000) &&
@@ -109,7 +135,8 @@ export function parseSave(text: string): Game {
     choice(p.target, segments);
   if (
     !obj(g) ||
-    g.version !== 1 ||
+    g.version !== 2 ||
+    !choice(g.campaignMonths, [36, 60, 120]) ||
     !str(g.name) ||
     !choice(g.specialty, specialties) ||
     !Number.isInteger(g.month) ||
@@ -147,8 +174,13 @@ export function parseSave(text: string): Game {
     if (new Set(list.map((x: any) => x.id)).size !== list.length)
       throw new Error("Sparfilen innehåller dubbla identiteter.");
   if (
-    g.deals.some(
-      (d: any) => d.assigned && !g.people.some((p: any) => p.id === d.assigned),
+    g.deals.some((d: any) =>
+      d.assignments.some(
+        (a: any) =>
+          !g.people.some(
+            (p: any) => p.id === a.personId && p.role !== "seller",
+          ),
+      ),
     )
   )
     throw new Error("Sparfilen har en okänd konsult.");
@@ -157,6 +189,34 @@ export function parseSave(text: string): Game {
     g.history.some((h: any, i: number) => h.month !== i + 1)
   )
     throw new Error("Månadshistoriken är inkonsekvent.");
+  for (const p of g.people) {
+    const bookings = g.deals.filter(
+      (d: any) =>
+        d.stage === 5 &&
+        d.remaining > 0 &&
+        d.assignments.some((a: any) => a.personId === p.id),
+    );
+    const months = new Set<number>();
+    bookings.forEach((d: any) => {
+      const from = Math.max(g.month, d.start);
+      months.add(from);
+    });
+    for (const month of months) {
+      const sum = bookings
+        .filter(
+          (d: any) =>
+            month >= Math.max(g.month, d.start) &&
+            month < Math.max(g.month, d.start) + d.remaining,
+        )
+        .reduce(
+          (sum: number, d: any) =>
+            sum + d.assignments.find((a: any) => a.personId === p.id).fraction,
+          0,
+        );
+      if (sum > 1.000001)
+        throw new Error("En konsult är dubbelbokad över 100 % i sparfilen.");
+    }
+  }
   return g as Game;
 }
 export const serialize = (g: Game) => JSON.stringify(g);

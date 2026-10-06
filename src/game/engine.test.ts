@@ -6,6 +6,8 @@ import {
   emptyAllocation,
   setAllocation,
   forecast,
+  setStaffing,
+  bookingAvailable,
 } from "./engine";
 import { balance, candidates } from "./data";
 import { parseSave, serialize } from "./save";
@@ -19,7 +21,7 @@ function contracted(): Game {
   d.rate = 1200;
   d.scope = 1;
   d.paymentTerms = 1;
-  d.assigned = "founder";
+  d.assignments = [{ personId: "founder", fraction: 1 }];
   g.people[0].allocation = { ...emptyAllocation(), delivery: 1 };
   return g;
 }
@@ -58,7 +60,7 @@ describe("Economy and capacity", () => {
   });
   it("cannot double-book or double-bill a person", () => {
     const g = contracted();
-    g.deals[1] = { ...g.deals[0], id: "second" };
+    g.deals[1] = { ...g.deals[0], id: "second", assignments: [] };
     expect(assign(g, "second", "founder")).toBe(g);
     const n = advance(g);
     expect(n.history[0].revenue).toBeLessThanOrEqual(192000);
@@ -182,36 +184,39 @@ describe("Replay and a complete campaign", () => {
     const g = newGame();
     expect(() => parseSave("{")).toThrow();
     expect(() =>
-      parseSave(serialize({ ...g, version: 2 } as unknown as Game)),
+      parseSave(serialize({ ...g, version: 999 } as unknown as Game)),
     ).toThrow();
     g.people[0].allocation.delivery = 1;
     expect(() => parseSave(serialize(g))).toThrow();
   });
-  it("plays 36 months with a founder-led strategy and can continue", () => {
-    let g = newGame("Strategitest", "Systemutveckling", 111);
-    for (let i = 1; i <= 36; i++) {
-      const active = g.deals.find((d) => d.stage === 5 && d.remaining > 0);
-      g.people[0].allocation = {
-        ...emptyAllocation(),
-        delivery: active ? 1 : 0,
-        sales: active ? 0 : 1,
-      };
-      if (active) g = assign(g, active.id, "founder");
-      else {
-        g.deals.forEach((d) => (d.priority = false));
-        const lead = g.deals.find((d) => d.stage < 5);
-        if (lead) lead.priority = true;
+  it.each([36, 60])(
+    "plays %i months with a founder-led strategy and can continue",
+    (months) => {
+      let g = newGame("Strategitest", "Systemutveckling", 111, months);
+      for (let i = 1; i <= months; i++) {
+        const active = g.deals.find((d) => d.stage === 5 && d.remaining > 0);
+        g.people[0].allocation = {
+          ...emptyAllocation(),
+          delivery: active ? 1 : 0,
+          sales: active ? 0 : 1,
+        };
+        if (active) g = assign(g, active.id, "founder");
+        else {
+          g.deals.forEach((d) => (d.priority = false));
+          const lead = g.deals.find((d) => d.stage < 5);
+          if (lead) lead.priority = true;
+        }
+        g = advance(g);
+        expect(g.bankrupt, `month ${i}, cash ${g.cash}`).toBe(false);
+        g = parseSave(serialize(g));
       }
-      g = advance(g);
-      expect(g.bankrupt, `month ${i}, cash ${g.cash}`).toBe(false);
-      g = parseSave(serialize(g));
-    }
-    expect(g.month).toBe(37);
-    expect(g.history).toHaveLength(36);
-    expect(advance(g)).toBe(g);
-    g.continued = true;
-    expect(advance(g).month).toBe(38);
-  });
+      expect(g.month).toBe(months + 1);
+      expect(g.history).toHaveLength(months);
+      expect(advance(g)).toBe(g);
+      g.continued = true;
+      expect(advance(g).month).toBe(months + 2);
+    },
+  );
   it("makes no retroactive revenue when a deal is newly won", () => {
     let g = newGame();
     g.deals[0].stage = 4;
@@ -230,5 +235,207 @@ describe("Replay and a complete campaign", () => {
       );
     }
     expect(candidates.filter((c) => c.role === "consultant")).toHaveLength(12);
+  });
+});
+
+function teammate(g: Game) {
+  g.people.push({
+    ...structuredClone(g.people[0]),
+    id: "c0",
+    name: "Maja Lind",
+    role: "consultant",
+    salary: 52000,
+  });
+}
+describe("Team staffing", () => {
+  it("splits one assignment 50/50 and invoices only actual combined delivery", () => {
+    let g = contracted();
+    teammate(g);
+    g = setStaffing(g, g.deals[0].id, "founder", 0.5);
+    g = setStaffing(g, g.deals[0].id, "c0", 0.5);
+    expect(g.deals[0].assignments).toHaveLength(2);
+    expect(forecast(g).revenue).toBe(192000);
+    g.seed = 42;
+    expect(advance(g).history[0].revenue).toBe(192000);
+  });
+  it("allows one person to share 40/60 between two contracts", () => {
+    const g = contracted();
+    g.deals[0].scope = 0.4;
+    g.deals[0].assignments[0].fraction = 0.4;
+    g.deals[1] = {
+      ...structuredClone(g.deals[0]),
+      id: "second",
+      scope: 0.6,
+      assignments: [],
+    };
+    const n = setStaffing(g, "second", "founder", 0.6);
+    expect(n.deals[1].assignments[0].fraction).toBe(0.6);
+    expect(forecast(n).revenue).toBe(192000);
+    n.seed = 42;
+    expect(advance(n).history[0].revenue).toBe(192000);
+  });
+  it("clamps overlapping bookings and never plans beyond contract scope", () => {
+    const g = contracted();
+    teammate(g);
+    g.deals[0].assignments[0].fraction = 0.7;
+    g.deals[1] = {
+      ...structuredClone(g.deals[0]),
+      id: "second",
+      assignments: [],
+    };
+    const n = setStaffing(g, "second", "founder", 1);
+    expect(n.deals[1].assignments[0].fraction).toBeCloseTo(0.3);
+    const k = setStaffing(n, g.deals[0].id, "c0", 1);
+    expect(k.deals[0].assignments[1].fraction).toBeCloseTo(0.3);
+  });
+  it("allows sequential future contracts without counting them as concurrent", () => {
+    const g = contracted();
+    g.deals[0].remaining = 2;
+    g.deals[1] = {
+      ...structuredClone(g.deals[0]),
+      id: "second",
+      start: 3,
+      assignments: [],
+    };
+    expect(bookingAvailable(g, "second", "founder")).toBe(1);
+    expect(
+      setStaffing(g, "second", "founder", 1).deals[1].assignments[0].fraction,
+    ).toBe(1);
+  });
+  it("supports a two-person full-time contract", () => {
+    let g = contracted();
+    teammate(g);
+    g.deals[0].scope = 2;
+    g = setStaffing(g, g.deals[0].id, "c0", 1);
+    expect(forecast(g).revenue).toBe(384000);
+    g.seed = 42;
+    expect(advance(g).history[0].revenue).toBe(384000);
+  });
+  it("caps delivery by each persons allocated time and ignores future starters", () => {
+    let g = contracted();
+    teammate(g);
+    g.deals[0].scope = 2;
+    g = setStaffing(g, g.deals[0].id, "c0", 1);
+    g.people[0].allocation = { ...emptyAllocation(), delivery: 0.5 };
+    g.people[1].start = 3;
+    expect(forecast(g).revenue).toBe(96000);
+    g.seed = 42;
+    expect(advance(g).history[0].revenue).toBe(96000);
+  });
+  it("subcontractors fill only the remaining delivery gap", () => {
+    const g = contracted();
+    g.deals[0].assignments[0].fraction = 0.5;
+    g.plan.subcontract = [g.deals[0].id];
+    const f = forecast(g);
+    expect(f.costs).toBe(61700 + 0.5 * 160 * 820);
+    expect(f.revenue).toBe(192000);
+    g.seed = 42;
+    const n = advance(g);
+    expect(n.history[0].costs).toBe(f.costs);
+    expect(n.history[0].revenue).toBe(f.revenue);
+  });
+  it("updates happiness once for total workload across contracts", () => {
+    const g = contracted();
+    g.deals[0].scope = 0.5;
+    g.deals[0].assignments[0].fraction = 0.5;
+    g.deals[1] = { ...structuredClone(g.deals[0]), id: "second" };
+    g.seed = 42;
+    expect(advance(g).people[0].happiness).toBe(80);
+  });
+  it("rejects unknown or duplicate team members and overlapping imported bookings", () => {
+    const g = contracted();
+    g.deals[0].assignments.push({ personId: "founder", fraction: 0.1 });
+    expect(() => parseSave(serialize(g))).toThrow();
+    g.deals[0].assignments = [{ personId: "unknown", fraction: 1 }];
+    expect(() => parseSave(serialize(g))).toThrow("okänd");
+    g.deals[0].assignments = [{ personId: "founder", fraction: 1 }];
+    g.deals[1] = { ...structuredClone(g.deals[0]), id: "second" };
+    expect(() => parseSave(serialize(g))).toThrow("dubbelbokad");
+  });
+  it("migrates old saved assignments without changing RNG or earned balances", () => {
+    const current = contracted();
+    const legacy: any = structuredClone(current);
+    legacy.version = 1;
+    delete legacy.campaignMonths;
+    legacy.deals = legacy.deals.map((d: any) => {
+      const { assignments, ...rest } = d;
+      return { ...rest, assigned: assignments[0]?.personId || "" };
+    });
+    const migrated = parseSave(JSON.stringify(legacy));
+    expect(migrated.version).toBe(2);
+    expect(migrated.campaignMonths).toBe(60);
+    expect(migrated.deals[0].assignments).toEqual([
+      { personId: "founder", fraction: 1 },
+    ]);
+    expect(migrated.seed).toBe(current.seed);
+    expect(migrated.cash).toBe(current.cash);
+    expect(advance(migrated)).toEqual(advance(current));
+  });
+});
+describe("Sales balance and campaign length", () => {
+  it("normally signs the warm first deal within 3–5 months with default sales time", () => {
+    const timings: number[] = [];
+    for (let seed = 1; seed <= 100; seed++) {
+      let g = newGame("Balans", "Systemutveckling", seed);
+      for (let month = 1; month <= 12; month++) {
+        g = advance(g);
+        if (g.deals[0].stage === 5) {
+          timings.push(month);
+          break;
+        }
+      }
+    }
+    timings.sort((a, b) => a - b);
+    expect(timings.length).toBeGreaterThanOrEqual(95);
+    expect(timings[49]).toBeLessThanOrEqual(4);
+    expect(timings[89]).toBeLessThanOrEqual(6);
+  });
+  it("does not advance the warm pipeline without sales effort", () => {
+    const g = newGame();
+    g.people[0].allocation = emptyAllocation();
+    const n = advance(g);
+    expect(n.deals[0].stage).toBe(2);
+    expect(n.history[0].revenue).toBe(0);
+  });
+  it("defaults to five years and supports chosen horizons", () => {
+    expect(newGame().campaignMonths).toBe(60);
+    const g = newGame("Test", "Data/AI", 1, 120);
+    g.month = 121;
+    expect(advance(g)).toBe(g);
+    g.continued = true;
+    expect(advance(g).month).toBe(122);
+  });
+});
+
+describe("Subcontractor utilization", () => {
+  it("keeps internal utilization below 100 percent when subcontracting a larger contract", () => {
+    const g = contracted();
+    g.deals[0].scope = 2;
+    g.plan.subcontract = [g.deals[0].id];
+    g.seed = 42;
+    const n = advance(g);
+    expect(n.history[0].revenue).toBe(384000);
+    expect(n.history[0].utilization).toBe(1);
+    expect(() => parseSave(serialize(n))).not.toThrow();
+  });
+});
+
+describe("Renewal capacity", () => {
+  it("does not renew into already reserved future capacity", () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const g = contracted();
+      g.seed = seed;
+      g.deals[0].remaining = 2;
+      g.deals[0].quality = 95;
+      g.deals[1] = {
+        ...structuredClone(g.deals[0]),
+        id: "future",
+        start: 3,
+        remaining: 6,
+      };
+      const n = advance(g);
+      expect(n.deals[0].remaining).toBe(1);
+      expect(() => parseSave(serialize(n))).not.toThrow();
+    }
   });
 });

@@ -42,7 +42,7 @@ export interface Deal {
   competition: number;
   priority: boolean;
   price: number;
-  assigned: string;
+  assignments: { personId: string; fraction: number }[];
   quality: number;
   remaining: number;
   postponed: number;
@@ -89,7 +89,8 @@ export interface Plan {
   target: Segment;
 }
 export interface Game {
-  version: 1;
+  version: 2;
+  campaignMonths: number;
   name: string;
   specialty: Specialty;
   month: number;

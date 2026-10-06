@@ -1,6 +1,6 @@
 # Konsultbolaget
 
-Ett spelbart svenskspråkigt strategispel om att bygga ett IT-konsultbolag, med React, TypeScript och Vite. En tur är en månad. Spela 36 månader, se resultatet och fortsätt om bolaget överlever.
+Ett spelbart svenskspråkigt strategispel om att bygga ett IT-konsultbolag, med React, TypeScript och Vite. En tur är en månad. Spela 60 månader som standard, välj 36 eller 120 månader, se resultatet och fortsätt om bolaget överlever.
 
 ## Starta
 
@@ -24,19 +24,22 @@ Browserkontroller kräver en lokal Chromium och en startad utvecklingsserver på
 ```sh
 node scripts/browser-check.mjs
 node scripts/interaction-check.mjs
+node scripts/staffing-check.mjs
 ```
 
-De använder `/usr/bin/chromium`; sätt `CHROMIUM_PATH` för en annan installation. Browserkontrollen spelar 36 månader via riktiga kontroller, fortsätter omgången, kontrollerar sparning/import/export och granskar alla vyer vid 1440, 768 och 390 px. Den andra kontrollen provar reversibla planer, kandidatbedömning, projekt och kredit. Bilder och en testsparfil skrivs till `/tmp/konsult-shots`.
+De använder `/usr/bin/chromium`; sätt `CHROMIUM_PATH` för en annan installation. Browserkontrollen spelar 36 månader via riktiga kontroller, fortsätter omgången, kontrollerar sparning/import/export och granskar alla vyer vid 1440, 768 och 390 px. Den andra kontrollen provar reversibla planer, kandidatbedömning, projekt och kredit. Bemanningskontrollen provar 50/50, 33 %, delade konsulter, fakturering, mobilvy och äldre sparfiler. Bilder och en testsparfil skrivs till `/tmp/konsult-shots`.
 
 ## Så spelar du
 
-1. Välj namn och en av tre inriktningar. Du börjar med 600 000 kr, en grundare och två affärsmöjligheter.
+1. Välj namn och en av tre inriktningar. Du börjar med 600 000 kr, en grundare och två affärsmöjligheter. Första kontakten börjar i behovsdialog och är prioriterad; den andra är redan kvalificerad.
 2. Avsätt tid i **Personal**. Dra först ner andra aktiviteter för att frigöra kapacitet. Ingen kan planeras över 100 %.
 3. Prioritera affärer och välj pris i **Försäljning**. Prioriterade affärer delar på säljtiden; om ingen prioriteras bearbetas de första två. Teknikstöd, säljbarhet, konkurrens, relationer och relevant material spelar roll.
-4. Signerade avtal måste bemannas i **Uppdrag** och konsulten måste ha leveranstid. Underkonsult är ett flexibelt men osäkert alternativ.
+4. Signerade avtal bemannas i **Uppdrag** med procent per konsult, i steg om 1 procentenhet. Till exempel täcker 50 % + 50 % ett uppdrag på 100 %. Samma person kan dela sin tid mellan flera uppdrag. Bokningar räknas över kontraktens faktiska överlappande månader och kan inte överstiga 100 % per person eller uppdragets omfattning. Avsätt också leveranstid under **Personal**. Underkonsulter kan fylla återstående leveransgap, med lägre marginal och osäker tillgänglighet.
 5. Bedöm kandidater innan erbjudande. Bedömning kräver 10 %, erbjudande 20 % rekryteringstid. Sökning kräver 20 %. Kandidater kan tacka nej och börjar efter 1–3 månader.
 6. Bygg kunskap och material i **Marknad**. Budget ensam ger ingen färdig produkt. Nationell expansion kräver kunskap, relationer, trovärdighet och intern tid.
 7. Kontrollera **Ekonomi**, klicka **Nästa månad**, granska planen och genomför den. Månadsrapporten beskriver utfallet.
+
+Säljtiden har större effekt än i första balansen. En kontroll över 100 frön kräver att minst 95 första affärer går i lås inom tolv månader, medianen senast månad fyra och 90:e percentilen senast månad sex, med grundarens standardplan. Vid verifieringen gick alla 100 affärer i lås inom tolv månader, medianen var månad tre och 90:e percentilen månad fem. Säljutfall är fortfarande osäkra och utebliven säljtid ger ingen framdrift. Den längre horisonten ger mer tid att bygga, men ändrar inte fasta kostnader eller behovet av likviditet.
 
 En möjlig start är att prioritera en affär och lägga mycket av grundarens tid på försäljning. När avtalet är vunnet måste du växla till leverans. Det ger intäkter men lämnar mindre tid för nästa affär och bolagets utveckling. En större personalstyrka ger mer kapacitet och betydligt högre fasta kostnader. Det finns ingen garanterad vinnande strategi.
 
@@ -68,15 +71,15 @@ Omsättning kommer från leverans, resultat från omsättning minus kostnader, o
 
 Ekonomin är justerbara spelantaganden. Juniorer är personer med mindre än två års erfarenhet. Handledning tar 10 % av en seniors kapacitet per junior. Säljare har en introduktionsmånad med reducerad effekt. Marknadens kunskap och trovärdighet stödjer försäljning; material används bara i relevant segment och relevanta affärsstadier. Materialets direkta effekt varar tolv månader och samma material kan inte staplas eller produceras om. Ett seminarium skapar kontakter som behöver följas upp.
 
-Förenklingar: en konsult kan tilldelas ett aktivt avtal även om avtalet är på deltid; återstående kapacitet kan användas till andra aktiviteter. Ingen personalneddragning eller aktiv avtalshävning finns i första versionen. Timavtal förlängs eller avslutas enligt behov och kvalitet; större upphandlingar simulerar ramavtal utan separat juridisk avtalsvy. Utländsk expansion, förvärv, fastprisprojekt och detaljerad skatteadministration är avgränsade enligt projektbeskrivningen. Spelbalansen är en första iteration, inte empiriskt validerad företagsekonomi.
+Uppdrag kan kräva 50–300 % kapacitet (upp till tre heltidstjänster). Större affärer genereras från månad sex. Teamets kvalitet viktas efter faktiskt levererade timmar; samma person kan inte fakturera samma kapacitet i flera uppdrag. Intern beläggning räknar endast egna konsulters leverans, inte underkonsulters tid. Ingen personalneddragning eller aktiv avtalshävning finns i första versionen. Timavtal förlängs eller avslutas enligt behov och kvalitet; större upphandlingar simulerar ramavtal utan separat juridisk avtalsvy. Utländsk expansion, förvärv, fastprisprojekt och detaljerad skatteadministration är avgränsade enligt projektbeskrivningen. Spelbalansen är en första iteration, inte empiriskt validerad företagsekonomi.
 
 ## Sparning
 
-`src/game/save.ts` versionsmärker formatet (version 1) och validerar importerade data: typer, talgränser, kapacitet, ID:n, referenser och månadshistorik. Felaktiga importer ersätter inte din omgång. Tillstånd, plan, historik och slumptillstånd lagras automatiskt i `localStorage` under `konsultbolaget-v1`. Export/import är JSON. Att rensa webbläsardata tar bort lokal sparning; exportera en kopia om omgången ska behållas. Ny omgång kräver en bekräftelse.
+`src/game/save.ts` versionsmärker formatet (version 2) och validerar importerade data: typer, talgränser, kapacitet, ID:n, referenser och månadshistorik. Äldre sparfiler i version 1 uppgraderas automatiskt: den tidigare konsulten blir en procentbokning, kassa och slumptillstånd bevaras och spelhorisonten förlängs till 60 månader. Felaktiga importer ersätter inte din omgång. Tillstånd, plan, historik och slumptillstånd lagras automatiskt i `localStorage` under `konsultbolaget-v1`. Export/import är JSON. Att rensa webbläsardata tar bort lokal sparning; exportera en kopia om omgången ska behållas. Ny omgång kräver en bekräftelse.
 
 ## Validering
 
-20 motortester täcker ekonomi, fakturering/betalning, framtida startdatum, kapacitet, dubbelbokning, begränsad kredit, rekrytering, delad projekttid, expansionstid, sparvalidering, reproducerbar slump och en hel 36-månadersomgång. Browserkontroller täcker den fungerande spelcykeln och responsiva vyer. Produktion byggs med TypeScript-kontroll. Webbpublicering görs separat enligt avsnittet nedan.
+36 motortester täcker ekonomi, fakturering/betalning, framtida startdatum, kapacitet, dubbelbokning, begränsad kredit, rekrytering, delad projekttid, expansionstid, sparvalidering, reproducerbar slump och hela 36- och 60-månadersomgångar. Browserkontroller täcker den fungerande spelcykeln och responsiva vyer. Produktion byggs med TypeScript-kontroll. Webbpublicering görs separat enligt avsnittet nedan.
 
 ## Spela på webben / GitHub Pages
 

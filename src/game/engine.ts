@@ -50,7 +50,12 @@ function addDeal(g: Game, segment?: Segment) {
     specialty,
     stage: 0,
     rate: 1050 + Math.floor(random(g) * 5) * 75,
-    scope: random(g) < 0.25 ? 0.5 : 1,
+    scope:
+      g.month >= 6 && random(g) < 0.3
+        ? 1.5 + Math.floor(random(g) * 4) * 0.5
+        : random(g) < 0.25
+          ? 0.5
+          : 1,
     duration: 4 + Math.floor(random(g) * 6),
     start: g.month + 2,
     decision: g.month + 2 + Math.floor(random(g) * 3),
@@ -58,7 +63,7 @@ function addDeal(g: Game, segment?: Segment) {
     competition: 0.2 + random(g) * 0.4,
     priority: false,
     price: 1,
-    assigned: "",
+    assignments: [],
     quality: 75,
     remaining: 0,
     postponed: 0,
@@ -71,9 +76,11 @@ export function newGame(
   name = "Lind & Partners",
   specialty: Specialty = "Systemutveckling",
   seed = 42,
+  campaignMonths = B.defaultCampaignMonths,
 ): Game {
   const g: Game = {
-    version: 1,
+    version: 2,
+    campaignMonths,
     name: name.trim().slice(0, 60) || "Lind & Partners",
     specialty,
     month: 1,
@@ -121,8 +128,10 @@ export function newGame(
   };
   addDeal(g, "Produktbolag");
   addDeal(g, "Industri");
-  g.deals.forEach((d) => {
+  g.deals.forEach((d, i) => {
     d.specialty = specialty;
+    d.stage = i === 0 ? 2 : 1;
+    d.priority = i === 0;
   });
   return g;
 }
@@ -154,34 +163,46 @@ export function forecast(g: Game) {
     g.plan.hires.length * B.hireCost +
     (g.plan.project ? materialTypes[g.plan.project.type].cost : 0) +
     (g.plan.expansion ? B.nationalCost : 0);
-  const revenue = g.deals
-    .filter((d) => d.stage === 5 && d.start <= g.month && d.remaining > 0)
-    .reduce((s, d) => {
-      const p = g.people.find((p) => p.id === d.assigned && p.start <= g.month);
-      return (
-        s +
-        (p
-          ? Math.min(d.scope, p.allocation.delivery) *
-            B.hours *
-            d.rate *
-            d.price
-          : g.plan.subcontract.includes(d.id)
-            ? d.scope * B.hours * d.rate * d.price
-            : 0)
+  const used = new Map<string, number>();
+  const mentorTime = mentorship(g);
+  let revenue = 0,
+    sub = 0;
+  const deliveries: { dealId: string; capacity: number }[] = [];
+  for (const d of g.deals.filter(
+    (d) => d.stage === 5 && d.start <= g.month && d.remaining > 0,
+  )) {
+    let capacity = 0;
+    for (const a of d.assignments) {
+      const p = g.people.find(
+        (p) => p.id === a.personId && p.start <= g.month && p.role !== "seller",
       );
-    }, 0);
-  const sub = g.deals
-    .filter(
-      (d) =>
-        d.stage === 5 &&
-        d.start <= g.month &&
-        g.plan.subcontract.includes(d.id),
-    )
-    .reduce((s, d) => s + d.scope * B.hours * B.subcontractRate, 0);
+      if (!p) continue;
+      const booked = Math.min(
+        a.fraction,
+        Math.max(
+          0,
+          p.allocation.delivery -
+            (mentorTime.get(p.id) || 0) -
+            (used.get(p.id) || 0),
+        ),
+        d.scope - capacity,
+      );
+      capacity += booked;
+      used.set(p.id, (used.get(p.id) || 0) + booked);
+    }
+    if (g.plan.subcontract.includes(d.id)) {
+      const gap = Math.max(0, d.scope - capacity);
+      sub += gap * B.hours * B.subcontractRate;
+      capacity += gap;
+    }
+    deliveries.push({ dealId: d.id, capacity });
+    revenue += capacity * B.hours * d.rate * d.price;
+  }
   const payments = g.invoices
     .filter((i) => i.due <= g.month)
     .reduce((s, i) => s + i.amount, 0);
   return {
+    deliveries,
     costs: costs + sub,
     revenue,
     profit: revenue - costs - sub,
@@ -192,26 +213,104 @@ export function forecast(g: Game) {
       .reduce((s, d) => s + d.rate * d.price * B.hours * d.scope, 0),
   };
 }
-export function assign(g: Game, dealId: string, personId: string): Game {
-  const n = structuredClone(g);
-  const d = n.deals.find((d) => d.id === dealId);
-  if (!d) return g;
+export const assignedCapacity = (d: Deal) =>
+  d.assignments.reduce((sum, a) => sum + a.fraction, 0);
+export function mentorship(g: Game) {
+  const result = new Map<string, number>();
+  const staff = activePeople(g);
+  for (const p of staff.filter(
+    (p) => p.role === "consultant" && p.experience < 2,
+  )) {
+    const mentor = staff.find(
+      (s) =>
+        s.experience >= 3 &&
+        s.specialty === p.specialty &&
+        s.allocation.delivery > 0.1,
+    );
+    if (mentor) result.set(mentor.id, (result.get(mentor.id) || 0) + 0.1);
+  }
+  return result;
+}
+export function bookingAvailable(g: Game, dealId: string, personId: string) {
+  const target = g.deals.find((d) => d.id === dealId);
+  if (!target) return 0;
+  const from = Math.max(g.month, target.start),
+    end = from + target.remaining;
+  const others = g.deals.filter(
+    (d) => d.id !== dealId && d.stage === 5 && d.remaining > 0,
+  );
+  let peak = 0;
+  for (let month = from; month < end; month++) {
+    const reserved = others
+      .filter(
+        (d) =>
+          month >= Math.max(g.month, d.start) &&
+          month < Math.max(g.month, d.start) + d.remaining,
+      )
+      .reduce(
+        (sum, d) =>
+          sum +
+          (d.assignments.find((a) => a.personId === personId)?.fraction || 0),
+        0,
+      );
+    peak = Math.max(peak, reserved);
+  }
+  return Math.max(0, 1 - peak);
+}
+export function setStaffing(
+  g: Game,
+  dealId: string,
+  personId: string,
+  fraction: number,
+): Game {
+  const d = g.deals.find((d) => d.id === dealId),
+    p = g.people.find((p) => p.id === personId);
   if (
-    personId &&
-    n.deals.some(
-      (x) =>
-        x.id !== d.id &&
-        x.stage === 5 &&
-        x.remaining > 0 &&
-        x.assigned === personId,
-    )
+    !d ||
+    d.stage !== 5 ||
+    d.remaining <= 0 ||
+    !p ||
+    p.role === "seller" ||
+    !Number.isFinite(fraction) ||
+    fraction < 0
   )
     return g;
-  d.assigned = personId;
+  const other = d.assignments
+    .filter((a) => a.personId !== personId)
+    .reduce((sum, a) => sum + a.fraction, 0);
+  const next = Math.min(
+    fraction,
+    bookingAvailable(g, dealId, personId),
+    Math.max(0, d.scope - other),
+  );
+  if (fraction > 0 && next <= 0) return g;
+  const n = structuredClone(g),
+    target = n.deals.find((d) => d.id === dealId)!;
+  target.assignments = target.assignments.filter(
+    (a) => a.personId !== personId,
+  );
+  if (Math.round(next * 10000) > 0)
+    target.assignments.push({
+      personId,
+      fraction: Math.round(next * 10000) / 10000,
+    });
   return n;
 }
+// Convenience for assigning one person; the interface uses setStaffing for team shares.
+export function assign(g: Game, dealId: string, personId: string): Game {
+  const d = g.deals.find((d) => d.id === dealId);
+  if (!d) return g;
+  if (personId && bookingAvailable(g, dealId, personId) <= 0) return g;
+  const n = structuredClone(g);
+  n.deals.find((d) => d.id === dealId)!.assignments = [];
+  return personId ? setStaffing(n, dealId, personId, Math.min(1, d.scope)) : n;
+}
 export function advance(input: Game): Game {
-  if (input.bankrupt || (input.month > 36 && !input.continued)) return input;
+  if (
+    input.bankrupt ||
+    (input.month > input.campaignMonths && !input.continued)
+  )
+    return input;
   const g = structuredClone(input);
   const log: string[] = [];
   const m = g.month;
@@ -332,21 +431,24 @@ export function advance(input: Game): Game {
   for (const d of g.deals.filter(
     (d) => d.stage === 5 && d.start <= m && d.remaining > 0,
   )) {
-    const p = staff.find((p) => p.id === d.assigned && p.role !== "seller");
-    let capacity = 0;
-    let quality = 35;
-    if (p) {
-      capacity = Math.min(
-        d.scope,
+    let capacity = 0,
+      qualityTotal = 0;
+    for (const a of d.assignments) {
+      const p = staff.find((p) => p.id === a.personId && p.role !== "seller");
+      if (!p) continue;
+      const booked = Math.min(
+        a.fraction,
         Math.max(
           0,
           p.allocation.delivery -
             (used.get(p.id) || 0) -
             (mentors.get(p.id) || 0),
         ),
+        Math.max(0, d.scope - capacity),
       );
-      used.set(p.id, (used.get(p.id) || 0) + capacity);
-      quality =
+      used.set(p.id, (used.get(p.id) || 0) + booked);
+      let actual = booked;
+      let q =
         (p.specialty === d.specialty ? 85 : 48) +
         (p.experience - 3) * 4 -
         (p.happiness < 50 ? 15 : 0);
@@ -359,33 +461,34 @@ export function advance(input: Game): Game {
             s.allocation.delivery > 0.1,
         )
       )
-        quality -= 20;
-      if (random(g) < 0.045) {
-        capacity *= 0.6;
+        q -= 20;
+      if (booked > 0 && random(g) < 0.045) {
+        actual *= 0.6;
         log.push(
           `Sjukfrånvaro: ${p.name} levererade färre timmar hos ${d.customer}.`,
         );
       }
-      p.happiness = Math.max(
-        0,
-        Math.min(
-          100,
-          p.happiness +
-            (capacity < 0.9 ? 1 : -3) -
-            (p.specialty !== d.specialty ? 5 : 0),
-        ),
-      );
-    } else if (plan.subcontract.includes(d.id)) {
+      capacity += actual;
+      qualityTotal += actual * q;
+      if (booked > 0 && p.specialty !== d.specialty)
+        p.happiness = Math.max(0, p.happiness - 5 * booked);
+    }
+    const ownDelivered = capacity;
+    if (plan.subcontract.includes(d.id) && capacity < d.scope) {
       if (random(g) < 0.85) {
-        capacity = d.scope;
-        quality = 74;
-        costs += capacity * B.hours * B.subcontractRate;
-        log.push(`Underkonsult bemannade ${d.customer}, med lägre marginal.`);
+        const gap = d.scope - capacity;
+        capacity += gap;
+        qualityTotal += gap * 74;
+        costs += gap * B.hours * B.subcontractRate;
+        log.push(
+          `Underkonsult fyllde ${Math.round(gap * 100)} % kapacitet hos ${d.customer}, med lägre marginal.`,
+        );
       } else log.push(`Underkonsult saknades för ${d.customer}.`);
     }
+    const quality = capacity > 0 ? qualityTotal / capacity : 35;
     const invoice = capacity * B.hours * d.rate * d.price;
     revenue += invoice;
-    delivered += capacity;
+    delivered += ownDelivered;
     if (invoice > 0)
       g.invoices.push({
         id: `i${m}-${d.id}`,
@@ -422,7 +525,18 @@ export function advance(input: Game): Game {
     }
     if (d.remaining === 1 && d.quality > 75 && random(g) < 0.35) {
       d.remaining += 3;
-      log.push(`Förlängning: ${d.customer} förlängde med tre månader.`);
+      if (
+        d.assignments.every(
+          (a) => a.fraction <= bookingAvailable(g, d.id, a.personId) + 0.000001,
+        )
+      ) {
+        log.push(`Förlängning: ${d.customer} förlängde med tre månader.`);
+      } else {
+        d.remaining -= 3;
+        log.push(
+          `Förlängning hos ${d.customer} uteblev: teamet är redan bokat på kommande uppdrag.`,
+        );
+      }
     }
     if (d.remaining === 0 && d.stage === 5) {
       d.stage = 7;
@@ -432,8 +546,8 @@ export function advance(input: Game): Game {
         log.push("Rekommendation: en nöjd kund öppnade en ny dörr.");
       }
     }
-    if (d.quality > 85 && d.scope < 1 && random(g) < 0.12) {
-      d.scope = 1;
+    if (d.quality > 85 && d.scope < 3 && random(g) < 0.12) {
+      d.scope = Math.min(3, d.scope + 0.5);
       log.push(
         `Utökat uppdrag: ${d.customer} vill öka omfattningen nästa månad.`,
       );
@@ -567,7 +681,9 @@ export function advance(input: Game): Game {
       (p) => p.role === "seller" && m - p.start >= 1 && p.allocation.sales > 0,
     );
     let chance =
-      effort * (0.95 + (specialist ? 0.3 : 0) + (seller ? 0.1 : 0)) +
+      effort *
+        B.salesEffect *
+        (0.95 + (specialist ? 0.3 : 0) + (seller ? 0.1 : 0)) +
       (mk.knowledge + mk.credibility) / 500 +
       relevant * 0.08 +
       d.relation / 500 -
@@ -594,7 +710,7 @@ export function advance(input: Game): Game {
           );
       }
     }
-    if (m > d.decision + 5 && random(g) < 0.15) {
+    if (d.stage < 5 && m > d.decision + 5 && random(g) < 0.15) {
       d.stage = 6;
       log.push(
         `${d.customer} valde en annan lösning. Tid, pris och konkurrens avgjorde.`,
@@ -607,6 +723,12 @@ export function advance(input: Game): Game {
     }
   }
   for (const p of staff) {
+    const deliveredShare = used.get(p.id) || 0;
+    if (deliveredShare > 0)
+      p.happiness = Math.max(
+        0,
+        Math.min(100, p.happiness + (deliveredShare < 0.9 ? 1 : -3)),
+      );
     if (p.allocation.training > 0) {
       p.experience = Math.min(5, p.experience + p.allocation.training * 0.2);
       p.happiness = Math.min(100, p.happiness + 2);
@@ -629,9 +751,10 @@ export function advance(input: Game): Game {
     } else p.notice = 0;
     if (p.notice >= 2 && p.role !== "founder" && random(g) < 0.35) {
       g.people = g.people.filter((x) => x.id !== p.id);
-      g.deals
-        .filter((d) => d.assigned === p.id)
-        .forEach((d) => (d.assigned = ""));
+      g.deals.forEach(
+        (d) =>
+          (d.assignments = d.assignments.filter((a) => a.personId !== p.id)),
+      );
       log.push(
         `Uppsägning: ${p.name} lämnade efter flera månader med låg trivsel.`,
       );

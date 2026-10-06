@@ -14,7 +14,7 @@ await page.getByRole("button", { name: "Starta mitt bolag" }).click();
 await page.getByRole("heading", { name: "Översikt", exact: true }).waitFor();
 await page.evaluate(async () => {
   const { newGame } = await import("/src/game/engine.ts");
-  const g = newGame("Lind & Partners", "Systemutveckling", 111);
+  const g = newGame("Lind & Partners", "Systemutveckling", 111, 36);
   localStorage.setItem("konsultbolaget-v1", JSON.stringify(g));
 });
 await page.reload();
@@ -60,7 +60,10 @@ for (let month = 1; month <= 36; month++) {
         has: page.getByRole("heading", { name: active.customer, exact: true }),
       })
       .first();
-    await card.getByRole("combobox").selectOption("founder");
+    await card
+      .getByRole("combobox")
+      .first()
+      .selectOption(String(Math.min(1, active.scope) * 100));
   } else {
     await nav("Försäljning");
     const state = await read();
