@@ -1,0 +1,20 @@
+// Each event has an explicit state-dependent trigger in the engine.
+export const eventNames = [
+  "Försenat kundbeslut",
+  "Prispress",
+  "Utökat uppdrag",
+  "Sjukfrånvaro",
+  "Uppsägning",
+  "Rekryteringskonkurrens",
+  "Försenad betalning",
+  "Rekommendation",
+  "Förlängning",
+  "Avslutat uppdrag",
+  "Trött grundare",
+  "Mentorskap lönar sig",
+  "Marknaden vaknar",
+  "Ramavtalsdialog",
+  "Materialet åldras",
+  "Bänken blir en verkstad",
+  "Kunden ger klartecken",
+];
